@@ -28,6 +28,7 @@ from app.services import (
     voice,
 )
 from app.services import upload_post
+from app.studio import materials as studio_materials
 from app.services import state as sm
 from app.utils import file_security, utils
 
@@ -618,6 +619,10 @@ def get_video_materials(
     audio_duration,
     loomloom_video_request: loomloom.LoomLoomConfirmedVideoRequest | None = None,
 ):
+    if params.video_source == "studio":
+        logger.info("\n\n## assembling studio materials (owner media + similar stock)")
+        return studio_materials.get_studio_materials(task_id, params, video_terms, audio_duration)
+
     if params.video_source == "local":
         logger.info("\n\n## preprocess local materials")
         materials = video.preprocess_video(

@@ -6,6 +6,7 @@ import mimetypes
 import os
 import re
 import shutil
+import tempfile
 import subprocess
 import sys
 import time
@@ -60,7 +61,7 @@ from app.utils.logging_utils import configure_terminal_logger
 from app.utils import utils
 
 st.set_page_config(
-    page_title="MoneyPrinterTurbo",
+    page_title="Chronus",
     page_icon="🤖",
     layout="wide",
     initial_sidebar_state="auto",
@@ -1372,7 +1373,7 @@ def _render_brand(available_update: str | None = None):
     st.markdown(
         f"""
         <h1 class="mpt-brand">
-            <span class="mpt-brand__name">MoneyPrinterTurbo</span>
+            <span class="mpt-brand__name">Chronus</span>
             <a class="mpt-brand__version"
                href="https://github.com/harry0703/MoneyPrinterTurbo"
                target="_blank"
@@ -3634,6 +3635,7 @@ def _render_video_settings(panel, params):
                 (tr("WaveSpeed AI Video"), "wavespeed"),
                 (tr("Shengsuan Cloud AI Video"), "loomloom"),
                 (tr("Local file"), "local"),
+                ("Studio (Owner Media)", "studio"),
             ]
 
             saved_video_source_name = config.app.get("video_source", "pexels")
@@ -5828,38 +5830,158 @@ def _render_application():
     if restore_applied or restore_succeeded:
         st.success(tr("Task Configuration Loaded"))
 
-    with st.container(key="main_settings_grid"):
-        panel = st.columns(4)
-    left_panel = panel[0]
-    middle_panel = panel[1]
-    audio_panel = panel[2]
-    right_panel = panel[3]
+    main_tab, studio_tab = st.tabs(["Create Video", "Studio (Owner Media)"])
 
-    params = VideoParams(video_subject="")
-    params.match_materials_to_script = bool(
-        st.session_state.get("match_materials_to_script", False)
-    )
-    _render_script_settings(left_panel, params)
+    with main_tab:
+        with st.container(key="main_settings_grid"):
+            panel = st.columns(4)
+        left_panel = panel[0]
+        middle_panel = panel[1]
+        audio_panel = panel[2]
+        right_panel = panel[3]
 
-    uploaded_files = _render_video_settings(middle_panel, params)
-    uploaded_audio_file, uploaded_bgm_file, voice_mode = _render_audio_settings(
-        audio_panel, params
-    )
+        params = VideoParams(video_subject="")
+        params.match_materials_to_script = bool(
+            st.session_state.get("match_materials_to_script", False)
+        )
+        _render_script_settings(left_panel, params)
 
-    _render_subtitle_settings(right_panel, params)
+        uploaded_files = _render_video_settings(middle_panel, params)
+        uploaded_audio_file, uploaded_bgm_file, voice_mode = _render_audio_settings(
+            audio_panel, params
+        )
 
-    generation_submitted = _render_generation_controls(
-        params,
-        uploaded_files,
-        uploaded_audio_file,
-        uploaded_bgm_file,
-        voice_mode,
-    )
+        _render_subtitle_settings(right_panel, params)
 
-    # 生成分支在启动后台线程前已经请求过保存。普通控件交互继续请求非阻塞保存；
-    # 如果后台任务正在使用配置，配置层会在任务结束时自动应用并落盘最新值。
-    if not generation_submitted:
-        _save_runtime_config()
+        generation_submitted = _render_generation_controls(
+            params,
+            uploaded_files,
+            uploaded_audio_file,
+            uploaded_bgm_file,
+            voice_mode,
+        )
+
+        # 生成分支在启动后台线程前已经请求过保存。普通控件交互继续请求非阻塞保存；
+        # 如果后台任务正在使用配置，配置层会在任务结束时自动应用并落盘最新值。
+        if not generation_submitted:
+            _save_runtime_config()
+
+    with studio_tab:
+        from app.studio import db as studio_db, media_pool, publish, voice_clone
+
+        st.write("## Studio (Owner Media)")
+        st.write("Upload your own videos/photos. If there aren't enough, similar stock footage fills the gap.")
+
+        # Owner & project
+        owner_name = st.text_input("Owner Name", key="studio_owner_name")
+        if st.button("Create Owner", key="studio_create_owner"):
+            owner_id = studio_db.new_id("own")
+            studio_db.insert("owners", id=owner_id, name=owner_name, contact="", created_at=time.time())
+            st.session_state["studio_owner_id"] = owner_id
+            st.success(f"Owner created: {owner_name}")
+
+        project_title = st.text_input("Project Title", key="studio_project_title")
+        if st.button("Create Project", key="studio_create_project"):
+            owner_id = st.session_state.get("studio_owner_id", "")
+            project_id = studio_db.new_id("prj")
+            studio_db.insert(
+                "projects", id=project_id, owner_id=owner_id, title=project_title,
+                topic="", platform="tiktok", status="draft", created_at=time.time(),
+            )
+            st.session_state["studio_project_id"] = project_id
+            st.success(f"Project created: {project_title}")
+
+        # Upload media
+        uploaded = st.file_uploader(
+            "Upload videos/photos",
+            type=["mp4", "mov", "avi", "flv", "mkv", "jpg", "jpeg", "png", "webp"],
+            accept_multiple_files=True,
+            key="studio_upload",
+        )
+        if st.button("Ingest Media", key="studio_ingest"):
+            project_id = st.session_state.get("studio_project_id", "")
+            tmp = tempfile.mkdtemp(prefix="studio-upload-")
+            try:
+                for f in uploaded:
+                    dest = os.path.join(tmp, f.name)
+                    with open(dest, "wb") as fp:
+                        fp.write(f.getbuffer())
+                ingested = media_pool.ingest_folder(project_id, tmp)
+                st.success(f"Ingested {len(ingested)} files")
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+
+        # Generate
+        topic = st.text_input("Ad Topic", key="studio_topic")
+
+        # Voice selection — reuse the existing Azure Edge TTS voice list
+        studio_all_voices = voice.get_all_azure_voices(filter_locals=None)
+        studio_voices = [v for v in studio_all_voices if "V2" not in v]
+        studio_friendly = {
+            v: v.replace("Female", tr("Female")).replace("Male", tr("Male")).replace("Neural", "")
+            for v in studio_voices
+        }
+        # Pick a sensible default based on UI language
+        studio_default_voice = "en-US-AriaNeural-Female"
+        ui_lang = st.session_state.get("ui_language", "en")
+        for v in studio_voices:
+            if v.lower().startswith(ui_lang.lower()):
+                studio_default_voice = v
+                break
+        studio_voice = st.selectbox(
+            "Voiceover Voice",
+            options=list(studio_friendly.keys()),
+            index=list(studio_friendly.keys()).index(studio_default_voice) if studio_default_voice in studio_friendly else 0,
+            format_func=lambda v: studio_friendly.get(v, v),
+            key="studio_voice_select",
+        )
+        if st.button("Generate Video", key="studio_generate"):
+            project_id = st.session_state.get("studio_project_id", "")
+            task_id = str(uuid4())
+            params = VideoParams(
+                video_subject=topic,
+                video_source="studio",
+                voice_name=studio_voice,
+                studio_project_id=project_id,
+                studio_stock_source="pexels",
+                studio_blend_mode="blend",
+            )
+            webui_task.submit_generation(task_id=task_id, params=params, capture_logs=True)
+            st.session_state["studio_task_id"] = task_id
+            st.success(f"Video generation started: {task_id}")
+
+        # Review & approve
+        if st.session_state.get("studio_task_id"):
+            task_id = st.session_state["studio_task_id"]
+            try:
+                task = sm.state.get_task(task_id)
+            except Exception:
+                task = None
+            if task:
+                state = task.get("state")
+                if state == const.TASK_STATE_COMPLETE:
+                    videos = task.get("videos") or []
+                    if videos:
+                        st.video(videos[0])
+                        if st.button("Approve", key="studio_approve"):
+                            render_id = studio_db.new_id("ren")
+                            studio_db.insert(
+                                "renders", id=render_id, project_id=st.session_state.get("studio_project_id", ""),
+                                video_path=videos[0], status="review", created_at=time.time(),
+                            )
+                            st.session_state["studio_render_id"] = render_id
+                            st.success("Render approved")
+                elif state == const.TASK_STATE_FAILED:
+                    st.error(f"Generation failed: {task.get('error', 'unknown error')}")
+
+        if st.session_state.get("studio_render_id"):
+            render_id = st.session_state["studio_render_id"]
+            if st.button("Publish to TikTok", key="studio_publish"):
+                results = publish.approve_and_publish(render_id, ["tiktok"])
+                if results.get("tiktok", {}).get("success"):
+                    st.success("Published to TikTok")
+                else:
+                    st.error(f"Publish failed: {results.get('tiktok', {}).get('error', 'unknown error')}")
 
 
 _render_application()

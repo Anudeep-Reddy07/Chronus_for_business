@@ -93,6 +93,9 @@ class VideoParams(BaseModel):
     video_materials: Optional[List[MaterialInfo]] = (
         None  # Materials used to generate the video
     )
+    studio_project_id: Optional[str] = ""
+    studio_stock_source: Optional[str] = "pexels"
+    studio_blend_mode: Optional[str] = "blend"
 
     custom_audio_file: Optional[str] = (
         None  # Custom audio file path, will ignore TTS and can still use Whisper subtitles

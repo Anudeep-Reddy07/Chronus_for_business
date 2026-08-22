@@ -471,6 +471,9 @@ def tts(
             audio_duration_seconds=duration_seconds,
         )
 
+    if voice_name.startswith("cloned:"):
+        return _handle_cloned_voice(voice_name, text, voice_file, voice_rate, voice_volume)
+
     if is_azure_v2_voice(voice_name):
         return azure_tts_v2(
             text,
@@ -2295,3 +2298,24 @@ if __name__ == "__main__":
         loop.run_until_complete(_do())
     finally:
         loop.close()
+
+
+def _handle_cloned_voice(
+    voice_name: str,
+    text: str,
+    voice_file: str,
+    voice_rate: float,
+    voice_volume: float,
+) -> Union[SubMaker, None]:
+    parts = voice_name.split(":", 2)
+    if len(parts) < 3:
+        logger.error(f"invalid cloned voice name: {voice_name}")
+        return None
+    clone_provider = parts[1]
+    voice_id = parts[2]
+
+    if clone_provider == "elevenlabs":
+        return elevenlabs_tts(text, voice_id, voice_file, voice_rate, voice_volume)
+
+    logger.error(f"unsupported clone provider: {clone_provider}")
+    return None
