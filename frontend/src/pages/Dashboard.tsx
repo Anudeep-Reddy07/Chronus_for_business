@@ -9,11 +9,9 @@ import {
   CheckCircle2,
   Clock,
   AlertCircle,
-  RefreshCw,
   Play,
-  Share2,
-  SlidersHorizontal,
-  Flame,
+  Trash2,
+  Loader2,
 } from 'lucide-react';
 import { apiClient, TaskItem } from '../api/client';
 import { VideoModal } from '../components/VideoModal';
@@ -22,10 +20,10 @@ export const Dashboard: React.FC = () => {
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'ready' | 'processing' | 'failed'>('all');
   const [selectedTask, setSelectedTask] = useState<TaskItem | null>(null);
+  const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
 
   useEffect(() => {
     loadTasks();
@@ -46,48 +44,62 @@ export const Dashboard: React.FC = () => {
   const loadTasks = async (showSpinner = true) => {
     try {
       if (showSpinner) setLoading(true);
-      setRefreshing(true);
       const data = await apiClient.getTasks();
       setTasks(data);
     } catch (err) {
       console.error('Failed to load tasks:', err);
     } finally {
       setLoading(false);
-      setRefreshing(false);
+    }
+  };
+
+  const handleDeleteTask = async (e: React.MouseEvent | null, taskId: string) => {
+    if (e) e.stopPropagation();
+    if (!window.confirm('Are you sure you want to delete this video project and its local files?')) {
+      return;
+    }
+    try {
+      setDeletingTaskId(taskId);
+      await apiClient.deleteTask(taskId);
+      setTasks((prev) => prev.filter((t) => t.task_id !== taskId));
+      if (selectedTask?.task_id === taskId) {
+        setSelectedTask(null);
+      }
+    } catch (err: any) {
+      alert(err.message || 'Failed to delete video project');
+    } finally {
+      setDeletingTaskId(null);
     }
   };
 
   const getStatusBadge = (state: number) => {
-    // TASK_STATE_COMPLETE = 1 or 2
     if (state === 1 || state === 2) {
       return (
-        <span className="badge badge-complete">
-          <CheckCircle2 size={12} />
+        <span className="badge badge-ready">
+          <CheckCircle2 size={11} />
           <span>Ready</span>
         </span>
       );
     }
-    // TASK_STATE_PROCESSING = 4
     if (state === 4) {
       return (
         <span className="badge badge-processing">
-          <Clock size={12} />
-          <span>Processing</span>
+          <Clock size={11} />
+          <span>Rendering</span>
         </span>
       );
     }
-    // TASK_STATE_FAILED = -1 or 3
     if (state === -1 || state === 3) {
       return (
         <span className="badge badge-failed">
-          <AlertCircle size={12} />
+          <AlertCircle size={11} />
           <span>Failed</span>
         </span>
       );
     }
     return (
       <span className="badge badge-draft">
-        <Clock size={12} />
+        <Clock size={11} />
         <span>Draft</span>
       </span>
     );
@@ -99,7 +111,7 @@ export const Dashboard: React.FC = () => {
   const failedCount = tasks.filter((t) => t.state === -1 || t.state === 3).length;
 
   const filteredTasks = tasks.filter((t) => {
-    const matchesSearch = (t.params?.video_subject || t.task_id || '')
+    const matchesSearch = (t.title || t.params?.video_subject || t.task_id || '')
       .toLowerCase()
       .includes(searchQuery.toLowerCase());
 
@@ -112,129 +124,77 @@ export const Dashboard: React.FC = () => {
   });
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '34px' }}>
       {/* Top Banner Header */}
       <div style={{
         display: 'flex',
         justifyContent: 'space-between',
-        alignItems: 'center',
+        alignItems: 'flex-start',
         flexWrap: 'wrap',
         gap: '20px',
       }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '4px 12px',
-              borderRadius: 'var(--radius-pill)',
-              background: 'rgba(255, 122, 0, 0.15)',
-              border: '1px solid rgba(255, 122, 0, 0.35)',
-              fontSize: '0.75rem',
-              fontWeight: 700,
-              color: '#FFAE34',
-              textTransform: 'uppercase',
-            }}>
-              <Flame size={13} color="#FFAE34" />
-              Hybrid Studio Active
-            </span>
-          </div>
-          <h1 style={{ fontSize: '2.5rem', fontWeight: 800, letterSpacing: '-0.03em' }}>
-            Creative <span className="gradient-text">Video Studio</span>
+          <span className="eyebrow-label" style={{ display: 'block', marginBottom: '6px' }}>
+            AI Video Generation Suite
+          </span>
+          <h1 style={{ fontSize: '2.3rem', fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--text-primary)', marginBottom: '6px' }}>
+            Creative Video Studio
           </h1>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.96rem', maxWidth: '600px' }}>
-            Transform your product videos & photos into viral ad campaigns. Blended with stock footage and synthesized voiceovers.
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.96rem', maxWidth: '640px', lineHeight: 1.5 }}>
+            Transform product media, AI copywriting, and voiceovers into high-converting video campaigns.
           </p>
         </div>
 
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
           <button
-            onClick={() => loadTasks(false)}
-            className="btn-glass"
-            style={{ padding: '12px 16px' }}
-            title="Refresh tasks"
-          >
-            <RefreshCw size={17} className={refreshing ? 'spin-icon' : ''} />
-            <span>Sync</span>
-          </button>
-
-          <button
             onClick={() => navigate('/new')}
-            className="btn-primary"
+            className="btn-vibrant"
           >
-            <Plus size={18} />
+            <Plus size={17} />
             <span>New Video Ad</span>
           </button>
         </div>
       </div>
 
-      {/* KPI Stats Strip */}
+      {/* KPI Stats Strip with Craft Elevation */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
         gap: '18px',
       }}>
-        <div className="glass-panel" style={{ padding: '20px 24px', display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div style={{
-            width: '46px',
-            height: '46px',
-            borderRadius: '14px',
-            background: 'var(--grad-sunset)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 8px 25px rgba(255, 0, 122, 0.35)',
-          }}>
+        <div className="glass-panel" style={{ padding: '22px', display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div className="avatar-brand">
             <Film size={22} color="#FFFFFF" />
           </div>
           <div>
-            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
+            <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
               Total Projects
             </span>
-            <h3 style={{ fontSize: '1.7rem', fontWeight: 800 }}>{totalProjects}</h3>
+            <h3 style={{ fontSize: '1.65rem', fontWeight: 800, color: 'var(--text-primary)' }}>{totalProjects}</h3>
           </div>
         </div>
 
-        <div className="glass-panel" style={{ padding: '20px 24px', display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div style={{
-            width: '46px',
-            height: '46px',
-            borderRadius: '14px',
-            background: 'var(--grad-cyan-blue)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 8px 25px rgba(0, 223, 216, 0.35)',
-          }}>
+        <div className="glass-panel" style={{ padding: '22px', display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div className="avatar-brand">
             <CheckCircle2 size={22} color="#FFFFFF" />
           </div>
           <div>
-            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
+            <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
               Ready to Publish
             </span>
-            <h3 style={{ fontSize: '1.7rem', fontWeight: 800 }}>{readyCount}</h3>
+            <h3 style={{ fontSize: '1.65rem', fontWeight: 800, color: 'var(--text-primary)' }}>{readyCount}</h3>
           </div>
         </div>
 
-        <div className="glass-panel" style={{ padding: '20px 24px', display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div style={{
-            width: '46px',
-            height: '46px',
-            borderRadius: '14px',
-            background: 'var(--grad-pink-purple)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 8px 25px rgba(121, 40, 202, 0.35)',
-          }}>
+        <div className="glass-panel" style={{ padding: '22px', display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div className="avatar-brand">
             <Clock size={22} color="#FFFFFF" />
           </div>
           <div>
-            <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>
+            <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
               In Generation
             </span>
-            <h3 style={{ fontSize: '1.7rem', fontWeight: 800 }}>{processingCount}</h3>
+            <h3 style={{ fontSize: '1.65rem', fontWeight: 800, color: 'var(--text-primary)' }}>{processingCount}</h3>
           </div>
         </div>
       </div>
@@ -248,7 +208,15 @@ export const Dashboard: React.FC = () => {
         gap: '16px',
       }}>
         {/* Status Filter Pills */}
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <div style={{
+          display: 'flex',
+          gap: '4px',
+          padding: '4px',
+          background: '#FFFFFF',
+          borderRadius: 'var(--radius-pill)',
+          border: '1px solid var(--border-subtle)',
+          boxShadow: 'var(--shadow-card)',
+        }}>
           {[
             { id: 'all', label: `All (${totalProjects})` },
             { id: 'ready', label: `Ready (${readyCount})` },
@@ -261,16 +229,16 @@ export const Dashboard: React.FC = () => {
                 key={tab.id}
                 onClick={() => setStatusFilter(tab.id as any)}
                 style={{
-                  padding: '8px 18px',
+                  padding: '7px 16px',
                   borderRadius: 'var(--radius-pill)',
-                  fontSize: '0.85rem',
-                  fontWeight: 600,
+                  fontSize: '0.84rem',
+                  fontWeight: 700,
                   cursor: 'pointer',
-                  border: isActive ? '1px solid rgba(255, 255, 255, 0.45)' : '1px solid rgba(255, 255, 255, 0.15)',
-                  background: isActive ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.06)',
-                  color: isActive ? '#FFFFFF' : 'var(--text-secondary)',
-                  backdropFilter: 'blur(10px)',
-                  transition: 'all 0.2s ease',
+                  border: isActive ? '1px solid var(--brand-border)' : '1px solid transparent',
+                  background: isActive ? 'var(--brand-light)' : 'transparent',
+                  color: isActive ? 'var(--brand-primary)' : 'var(--text-secondary)',
+                  boxShadow: isActive ? '0 2px 6px rgba(234, 88, 12, 0.08)' : 'none',
+                  transition: 'all 0.15s ease',
                 }}
               >
                 {tab.label}
@@ -280,8 +248,8 @@ export const Dashboard: React.FC = () => {
         </div>
 
         {/* Search Bar */}
-        <div style={{ position: 'relative', width: '300px' }}>
-          <Search size={17} style={{
+        <div style={{ position: 'relative', width: '280px' }}>
+          <Search size={16} style={{
             position: 'absolute',
             left: '14px',
             top: '50%',
@@ -290,11 +258,11 @@ export const Dashboard: React.FC = () => {
           }} />
           <input
             type="text"
-            placeholder="Search projects or IDs..."
+            placeholder="Search projects..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="glass-input"
-            style={{ paddingLeft: '40px', borderRadius: 'var(--radius-pill)', fontSize: '0.88rem' }}
+            className="app-input"
+            style={{ paddingLeft: '38px', borderRadius: 'var(--radius-pill)', fontSize: '0.88rem' }}
           />
         </div>
       </div>
@@ -304,59 +272,58 @@ export const Dashboard: React.FC = () => {
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-          gap: '24px',
+          gap: '20px',
         }}>
           {[1, 2, 3, 4, 5, 6].map((i) => (
             <div
               key={i}
               className="glass-panel"
-              style={{ height: '260px', opacity: 0.4, animation: 'pulse 1.5s infinite' }}
+              style={{ height: '260px', opacity: 0.6, animation: 'pulse 1.5s infinite' }}
             />
           ))}
         </div>
       ) : filteredTasks.length === 0 ? (
         /* Empty State */
         <div className="glass-panel" style={{
-          padding: '70px 30px',
+          padding: '56px 32px',
           textAlign: 'center',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          gap: '16px',
+          gap: '14px',
         }}>
-          <div style={{
-            width: '74px',
-            height: '74px',
-            borderRadius: '24px',
-            background: 'var(--grad-sunset)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            boxShadow: '0 15px 40px rgba(255, 0, 122, 0.4)',
-          }}>
-            <Film size={34} color="#FFFFFF" />
+          <div className="avatar-brand" style={{ width: '56px', height: '56px', borderRadius: '16px' }}>
+            <Film size={26} color="#FFFFFF" />
           </div>
-          <h3 style={{ fontSize: '1.6rem', fontWeight: 800 }}>No video projects found</h3>
-          <p style={{ color: 'var(--text-secondary)', maxWidth: '440px', fontSize: '0.95rem', lineHeight: 1.5 }}>
-            Ready to generate your first ad? Upload your product footage, pick an ad topic, and let Chronus do the rest.
-          </p>
-          <button
-            onClick={() => navigate('/new')}
-            className="btn-primary"
-            style={{ marginTop: '10px' }}
-          >
-            <Sparkles size={18} />
-            <span>Create First Ad</span>
-          </button>
+          <h3 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-primary)' }}>No video projects found</h3>
+          {totalProjects === 0 ? (
+            <>
+              <p style={{ color: 'var(--text-secondary)', maxWidth: '440px', fontSize: '0.92rem', lineHeight: 1.5 }}>
+                Ready to generate your first ad? Upload your product footage, pick an ad topic, and let Chronus do the rest.
+              </p>
+              <button
+                onClick={() => navigate('/new')}
+                className="btn-vibrant"
+                style={{ marginTop: '6px' }}
+              >
+                <Sparkles size={16} />
+                <span>Create First Ad</span>
+              </button>
+            </>
+          ) : (
+            <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>
+              No projects match the selected filter.
+            </p>
+          )}
         </div>
       ) : (
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))',
-          gap: '24px',
+          gap: '22px',
         }}>
           {filteredTasks.map((task) => {
-            const title = task.params?.video_subject || `Project ${task.task_id.slice(0, 8)}`;
+            const title = task.title || task.params?.video_subject || (task.task_id.startsWith('prj-') ? `Project ${task.task_id.slice(4, 12)}` : `Project ${task.task_id.slice(0, 8)}`);
             const aspect = task.params?.video_aspect || '9:16';
             const videoUrl = task.videos && task.videos[0]
               ? (task.videos[0].startsWith('http') || task.videos[0].startsWith('/')
@@ -371,7 +338,7 @@ export const Dashboard: React.FC = () => {
                 key={task.task_id}
                 className="glass-panel glass-panel-hover"
                 style={{
-                  padding: '22px',
+                  padding: '20px',
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '16px',
@@ -381,38 +348,66 @@ export const Dashboard: React.FC = () => {
                 }}
                 onClick={() => setSelectedTask(task)}
               >
-                {/* Header: Title & Status */}
+                {/* Header: Title, Status & Actions */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '10px' }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <h3 style={{
-                      fontSize: '1.18rem',
+                      fontSize: '1.1rem',
                       fontWeight: 700,
                       lineHeight: 1.3,
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
-                      marginBottom: '4px',
+                      marginBottom: '3px',
+                      color: 'var(--text-primary)',
                     }}>
                       {title}
                     </h3>
-                    <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                    <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                       {aspect} · {task.params?.voice_name?.split('-')[0] || 'Studio'}
                     </span>
                   </div>
-                  {getStatusBadge(task.state)}
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {getStatusBadge(task.state)}
+                    <button
+                      type="button"
+                      onClick={(e) => handleDeleteTask(e, task.task_id)}
+                      disabled={deletingTaskId === task.task_id}
+                      className="btn-secondary"
+                      style={{
+                        padding: '6px',
+                        borderRadius: '6px',
+                        color: 'var(--text-muted)',
+                        width: '28px',
+                        height: '28px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                      title="Delete video project"
+                    >
+                      {deletingTaskId === task.task_id ? (
+                        <Loader2 size={13} className="spin-icon" />
+                      ) : (
+                        <Trash2 size={13} />
+                      )}
+                    </button>
+                  </div>
                 </div>
 
                 {/* Video Preview Box */}
                 <div style={{
-                  height: '150px',
-                  borderRadius: 'var(--radius-md)',
-                  background: 'rgba(0, 0, 0, 0.45)',
-                  border: '1px solid rgba(255, 255, 255, 0.15)',
+                  height: '155px',
+                  borderRadius: 'var(--radius-sm)',
+                  background: '#1C1917',
+                  border: '1px solid var(--border-subtle)',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   overflow: 'hidden',
                   position: 'relative',
+                  boxShadow: 'inset 0 0 20px rgba(0, 0, 0, 0.4)',
                 }}>
                   {videoUrl ? (
                     <>
@@ -426,26 +421,23 @@ export const Dashboard: React.FC = () => {
                       <div style={{
                         position: 'absolute',
                         inset: 0,
-                        background: 'rgba(0, 0, 0, 0.35)',
+                        background: 'rgba(28, 25, 23, 0.3)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        opacity: 0.85,
-                        transition: 'opacity 0.2s',
+                        transition: 'all 0.2s',
                       }}>
                         <div style={{
-                          width: '44px',
-                          height: '44px',
+                          width: '42px',
+                          height: '42px',
                           borderRadius: '50%',
-                          background: 'rgba(255, 255, 255, 0.25)',
-                          backdropFilter: 'blur(8px)',
-                          border: '1px solid rgba(255, 255, 255, 0.6)',
+                          background: 'rgba(255, 255, 255, 0.95)',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          boxShadow: '0 0 20px rgba(0, 0, 0, 0.4)',
+                          boxShadow: '0 4px 16px rgba(0, 0, 0, 0.3)',
                         }}>
-                          <Play size={20} color="#FFFFFF" fill="#FFFFFF" style={{ marginLeft: '2px' }} />
+                          <Play size={18} color="#1C1917" fill="#1C1917" style={{ marginLeft: '2px' }} />
                         </div>
                       </div>
                     </>
@@ -455,10 +447,10 @@ export const Dashboard: React.FC = () => {
                       flexDirection: 'column',
                       alignItems: 'center',
                       gap: '8px',
-                      color: 'var(--text-muted)',
+                      color: 'rgba(255, 255, 255, 0.7)',
                     }}>
-                      <Video size={30} />
-                      <span style={{ fontSize: '0.8rem' }}>
+                      <Video size={28} />
+                      <span style={{ fontSize: '0.8rem', fontWeight: 500 }}>
                         {task.state === 4 ? 'Rendering video...' : 'No preview available'}
                       </span>
                     </div>
@@ -475,22 +467,22 @@ export const Dashboard: React.FC = () => {
                     marginBottom: '6px',
                   }}>
                     <span>{isComplete ? 'Ready to share' : task.state === 4 ? 'Rendering clips' : 'Status'}</span>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, color: 'var(--brand-primary)' }}>
                       {task.progress || (isComplete ? 100 : 0)}%
                     </span>
                   </div>
 
                   <div style={{
                     width: '100%',
-                    height: '6px',
-                    background: 'rgba(255, 255, 255, 0.1)',
+                    height: '5px',
+                    background: 'var(--bg-surface-subtle)',
                     borderRadius: '3px',
                     overflow: 'hidden',
                   }}>
                     <div style={{
                       width: `${task.progress || (isComplete ? 100 : 0)}%`,
                       height: '100%',
-                      background: isComplete ? 'var(--grad-cyan-blue)' : 'var(--grad-sunset)',
+                      background: 'var(--grad-brand)',
                       borderRadius: '3px',
                       transition: 'width 0.4s ease',
                     }} />
@@ -507,6 +499,7 @@ export const Dashboard: React.FC = () => {
         <VideoModal
           task={selectedTask}
           onClose={() => setSelectedTask(null)}
+          onDelete={(taskId) => handleDeleteTask(null, taskId)}
         />
       )}
     </div>

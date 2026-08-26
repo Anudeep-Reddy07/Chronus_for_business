@@ -2,6 +2,8 @@ export interface TaskItem {
   task_id: string;
   state: number; // 0: created, 1: processing, 2: complete, 3: failed
   progress: number;
+  title?: string;
+  topic?: string;
   videos?: string[];
   combined_videos?: string[];
   error?: string;
@@ -63,6 +65,18 @@ export const apiClient = {
     return data.data;
   },
 
+  // Delete task / project and its local files
+  async deleteTask(taskId: string): Promise<boolean> {
+    const res = await fetch(`/api/v1/tasks/${encodeURIComponent(taskId)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || 'Failed to delete video project');
+    }
+    return true;
+  },
+
   // Create video generation task
   async createVideo(params: VideoParamsPayload): Promise<{ task_id: string }> {
     const res = await fetch('/api/v1/videos', {
@@ -108,7 +122,7 @@ export const apiClient = {
     return data.data.ingested || [];
   },
 
-  async publishRender(renderId: string, platforms: string[] = ['tiktok']): Promise<any> {
+  async publishRender(renderId: string, platforms: string[] = ['youtube']): Promise<any> {
     const res = await fetch(`/api/v1/studio/publish?render_id=${encodeURIComponent(renderId)}&platforms=${encodeURIComponent(platforms.join(','))}`, {
       method: 'POST',
     });
@@ -116,4 +130,66 @@ export const apiClient = {
     const data = await res.json();
     return data.data;
   },
+
+  // Custom Cloned Voices
+  async getCustomVoices(): Promise<CustomVoice[]> {
+    const res = await fetch('/api/v1/studio/voices');
+    if (!res.ok) throw new Error('Failed to fetch custom voices');
+    const data = await res.json();
+    return data.data?.voices || [];
+  },
+
+  async createClonedVoice(name: string, files: File[], provider: string = 'fish_audio'): Promise<any> {
+    const formData = new FormData();
+    files.forEach((f) => formData.append('files', f));
+    const res = await fetch(`/api/v1/studio/voices?name=${encodeURIComponent(name)}&provider=${encodeURIComponent(provider)}`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || 'Voice cloning failed');
+    }
+    const data = await res.json();
+    return data.data;
+  },
+
+  async deleteCustomVoice(voiceId: string): Promise<boolean> {
+    const res = await fetch(`/api/v1/studio/voices/${encodeURIComponent(voiceId)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) throw new Error('Failed to delete custom voice');
+    return true;
+  },
+
+  // Engine Configuration
+  async getEngineConfig(): Promise<any> {
+    const res = await fetch('/api/v1/studio/config');
+    if (!res.ok) throw new Error('Failed to fetch engine config');
+    const data = await res.json();
+    return data.data;
+  },
+
+  async updateEngineConfig(config: any): Promise<any> {
+    const res = await fetch('/api/v1/studio/config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || 'Failed to update engine config');
+    }
+    const data = await res.json();
+    return data;
+  },
 };
+
+export interface CustomVoice {
+  id: string;
+  name: string;
+  provider: string;
+  voice_id: string;
+  created_at: number;
+}
+

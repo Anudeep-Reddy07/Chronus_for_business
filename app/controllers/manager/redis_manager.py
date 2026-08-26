@@ -32,9 +32,7 @@ class RedisTaskManager(TaskManager):
 
     def enqueue(self, task: Dict):
         task_with_serializable_params = task.copy()
-        # task.copy() 只复制最外层字典；如果直接改写嵌套 kwargs，会把调用方
-        # 持有的 VideoParams 同步替换成 dict。后续日志或重试仍可能读取原任务，
-        # 因此这里单独复制 kwargs，确保序列化过程没有意外副作用。
+        # Shallow copy kwargs to prevent mutating caller references during serialization
         task_kwargs = task.get("kwargs", {})
         task_with_serializable_params["kwargs"] = task_kwargs.copy()
 
@@ -43,24 +41,19 @@ class RedisTaskManager(TaskManager):
                 "params"
             ].model_dump(warnings=False)
 
-        # 将函数对象转换为其名称
+        # Convert function object to name for serialization
         task_with_serializable_params["func"] = task["func"].__name__
         self.redis_client.rpush(self.queue, json.dumps(task_with_serializable_params))
 
     def dequeue(self):
-        # 循环而非单次弹出：某个任务在入队时可能满足当时的 VideoParams 校验规则，
-        # 但校验规则本身在两次部署之间收紧了（例如新增 ge=1 约束）。lpop 是破坏性
-        # 操作，一旦弹出就不能放回原位；如果重建 VideoParams 时才发现校验失败，
-        # 这条任务已经从队列中永久移除了，不能再假装它还在。与其让异常从这里往上
-        # 抛、把这条已经丢失的任务的 lock 持有者带崩，不如原地丢弃并继续尝试队列
-        # 里的下一条，把"拿到一条可用任务或者队列确实空了"这个约定维持住。
+        # Loop until a valid queued task is found or queue is empty
         while True:
             task_json = self.redis_client.lpop(self.queue)
             if not task_json:
                 return None
 
             task_info = json.loads(task_json)
-            # 将函数名称转换回函数对象
+            # Map function name back to callable
             task_info["func"] = FUNC_MAP[task_info["func"]]
 
             if "params" in task_info["kwargs"] and isinstance(
@@ -73,13 +66,9 @@ class RedisTaskManager(TaskManager):
                 except ValidationError as e:
                     logger.error(
                         "dropping queued task with params that fail current "
-                        f"VideoParams validation (queued under an older, more "
-                        f"permissive schema, or corrupted): {e}"
+                        f"VideoParams validation: {e}"
                     )
-                    # 任务状态记录在入队前就已创建，且默认是 processing；如果只是
-                    # 丢弃这条队列项而不动状态记录，API/WebUI 会一直显示任务在
-                    # 运行，永远不会变成失败。用 patch_task 而不是 update_task，
-                    # 这样如果用户已经删除了这个任务，我们不会又把它建回来。
+                    # Mark task failed in state database
                     task_id = task_info["kwargs"].get("task_id")
                     if task_id:
                         sm.state.patch_task(

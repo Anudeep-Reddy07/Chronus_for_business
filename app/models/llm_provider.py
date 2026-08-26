@@ -6,7 +6,7 @@ DEFAULT_LLM_PROVIDER_ID = "moonshot"
 
 @dataclass(frozen=True, slots=True)
 class LLMProviderField:
-    """描述 Provider 除 API Key、Base URL、模型名之外的额外配置字段。"""
+    """Describes additional configuration fields beyond API Key, Base URL, and Model Name."""
 
     config_suffix: str
     label_key: str
@@ -17,7 +17,7 @@ class LLMProviderField:
 
 @dataclass(frozen=True, slots=True)
 class LLMProviderEndpoint:
-    """描述同一 Provider 在不同服务区域使用的配套入口和 API 地址。"""
+    """Describes regional service endpoints and API URLs for a provider."""
 
     endpoint_id: str
     default_label: str
@@ -29,11 +29,9 @@ class LLMProviderEndpoint:
 @dataclass(frozen=True, slots=True)
 class LLMProviderSpec:
     """
-    LLM Provider 的集中声明。
+    Centralized declaration of an LLM Provider.
 
-    这里集中保存跨 WebUI、配置加载和服务调用都会使用的稳定元数据，包括默认
-    展示名称和 locale key，但不保存具体翻译文案，也不实现 API 请求。这样
-    Provider 的“是什么”由 Registry 维护，“怎么调用”仍由服务层适配器负责。
+    Stores stable metadata used across WebUI, config loading, and service calls.
     """
 
     provider_id: str
@@ -81,14 +79,14 @@ class LLMProviderSpec:
         return f"{self.provider_id}_{suffix}"
 
     def resolve_model_name(self, configured_model: str | None) -> str:
-        """将空值或已废弃的历史默认值统一解析为当前默认模型。"""
+        """Resolve empty or deprecated model names to current defaults."""
         model_name = (configured_model or "").strip()
         if not model_name or model_name in self.deprecated_models:
             return self.default_model
         return model_name
 
     def resolve_base_url(self, configured_base_url: str | None) -> str:
-        """解析 Base URL，并将已经停用的历史地址迁移到当前默认值。"""
+        """Resolve base URL, migrating decommissioned URLs to current default."""
         base_url = (configured_base_url or "").strip()
         deprecated_urls = {url.rstrip("/") for url in self.deprecated_base_urls}
         if not base_url or base_url.rstrip("/") in deprecated_urls:
@@ -96,7 +94,7 @@ class LLMProviderSpec:
         return base_url
 
     def get_service_endpoint(self, endpoint_id: str) -> LLMProviderEndpoint | None:
-        """按稳定 ID 获取服务区域，避免业务逻辑依赖可变化的推广链接。"""
+        """Retrieve service endpoint by stable ID."""
         return next(
             (
                 endpoint
@@ -108,30 +106,30 @@ class LLMProviderSpec:
 
     @property
     def default_service_endpoint(self) -> LLMProviderEndpoint | None:
-        """返回 Provider 声明的默认服务区域。"""
+        """Return provider declared default service endpoint."""
         return self.get_service_endpoint(self.default_service_endpoint_id)
 
     @property
     def international_service_endpoint(self) -> LLMProviderEndpoint | None:
-        """返回 Provider 声明的国际服务区域。"""
+        """Return provider declared international service endpoint."""
         return self.get_service_endpoint(self.international_service_endpoint_id)
 
     @property
     def effective_default_base_url(self) -> str:
-        """优先从默认服务区域读取 Base URL，普通 Provider 仍使用原字段。"""
+        """Read Base URL from default endpoint or fallback to default_base_url."""
         endpoint = self.default_service_endpoint
         return endpoint.base_url if endpoint else self.default_base_url
 
     def preferred_service_endpoint(
         self, *, prefer_international: bool
     ) -> LLMProviderEndpoint | None:
-        """根据界面区域返回首选入口，缺少国际入口时安全回退默认入口。"""
+        """Return preferred endpoint based on region preference."""
         if prefer_international and self.international_service_endpoint:
             return self.international_service_endpoint
         return self.default_service_endpoint
 
     def effective_api_key_url(self, *, prefer_international: bool = False) -> str:
-        """统一解析 API Key 申请入口，避免 Endpoint Provider 重复维护链接。"""
+        """Resolve API Key sign-up/management URL."""
         endpoint = self.preferred_service_endpoint(
             prefer_international=prefer_international
         )
@@ -140,7 +138,7 @@ class LLMProviderSpec:
     def find_service_endpoint(
         self, configured_base_url: str | None
     ) -> LLMProviderEndpoint | None:
-        """根据已保存的 Base URL 识别 Provider 的标准服务区域。"""
+        """Match configured Base URL to a standard endpoint."""
         normalized_url = (configured_base_url or "").strip().rstrip("/")
         if not normalized_url:
             return None
@@ -161,12 +159,7 @@ class LLMProviderSpec:
         prefer_international: bool,
     ) -> LLMProviderEndpoint | None:
         """
-        选择 WebUI 应展示的标准服务区域。
-
-        已明确保存的标准地址优先；未知地址保留为自定义。历史配置可能只有
-        API Key 而没有 Base URL，这类用户继续使用 Registry 默认区域，避免
-        升级后因界面语言不同而切换服务。只有全新配置才根据界面语言选择
-        国际入口。
+        Select standard service endpoint for display in UI.
         """
         configured_url = (configured_base_url or "").strip()
         if configured_url:
@@ -181,11 +174,9 @@ class LLMProviderSpec:
         )
 
 
-# 元组顺序就是 WebUI 下拉框顺序。新增普通 OpenAI-compatible Provider 时，
-# 通常只需要在这里增加一项并补充 locale；只有协议不同的 Provider 才需要在
-# app/services/llm.py 中增加对应 adapter 实现。
+# Order determines WebUI dropdown ordering.
 LLM_PROVIDER_REGISTRY = (
-    # 推荐 Provider
+    # Recommended Providers
     LLMProviderSpec(
         "moonshot",
         "Kimi / Moonshot AI",
@@ -198,12 +189,12 @@ LLM_PROVIDER_REGISTRY = (
                 api_key_url=(
                     "https://platform.kimi.com?"
                     "track_id=track-2f5441d6ffd84c509dd079d78e9db5dc&"
-                    "aff=moneyprinterturbo"
+                    "aff=chronus"
                 ),
                 model_docs_url=(
                     "https://platform.kimi.com/docs/models?"
                     "track_id=track-2f5441d6ffd84c509dd079d78e9db5dc&"
-                    "aff=moneyprinterturbo"
+                    "aff=chronus"
                 ),
             ),
             LLMProviderEndpoint(
@@ -213,19 +204,19 @@ LLM_PROVIDER_REGISTRY = (
                 api_key_url=(
                     "https://platform.kimi.ai?"
                     "track_id=track-f6b0a640d35c41deb03b247242a1058c&"
-                    "aff=moneyprinterturbo"
+                    "aff=chronus"
                 ),
                 model_docs_url=(
                     "https://platform.kimi.ai/docs/models?"
                     "track_id=track-f6b0a640d35c41deb03b247242a1058c&"
-                    "aff=moneyprinterturbo"
+                    "aff=chronus"
                 ),
             ),
         ),
         default_service_endpoint_id="china",
         international_service_endpoint_id="global",
     ),
-    # 主流模型原厂与云厂商
+    # Mainstream Model Providers & Clouds
     LLMProviderSpec(
         "openai",
         "OpenAI",
@@ -282,7 +273,7 @@ LLM_PROVIDER_REGISTRY = (
         api_key_url=(
             "https://www.volcengine.com/activity/ai618?utm_campaign=hw&"
             "utm_content=hw&utm_medium=devrel_tool_web&utm_source=OWO&"
-            "utm_term=MoneyPrinterTurbo"
+            "utm_term=Chronus"
         ),
         default_model="doubao-seed-2-1-turbo-260628",
         default_base_url="https://ark.cn-beijing.volces.com/api/v3",
@@ -310,7 +301,7 @@ LLM_PROVIDER_REGISTRY = (
         default_model="mimo-v2.5-pro",
         default_base_url="https://api.xiaomimimo.com/v1",
     ),
-    # 聚合与统一接入平台
+    # Unified & Aggregation Gateways
     LLMProviderSpec(
         "shengsuanyun",
         "Shengsuan Cloud",
@@ -365,7 +356,7 @@ LLM_PROVIDER_REGISTRY = (
         default_model="gpt-5.5",
         default_base_url="https://direct.evolink.ai/v1",
     ),
-    # 本地部署与通用网关
+    # Local & Custom Gateways
     LLMProviderSpec(
         "ollama",
         "Ollama",
@@ -387,7 +378,7 @@ LLM_PROVIDER_REGISTRY = (
         show_api_key=False,
         show_base_url=False,
     ),
-    # 其它推理与公共服务
+    # Inference & Public APIs
     LLMProviderSpec(
         "groq",
         "Groq",
@@ -418,10 +409,7 @@ def get_llm_provider(provider_id: str) -> LLMProviderSpec | None:
 
 def normalize_provider_override(value: str | None, default_value: str | None) -> str:
     """
-    只保留与 Registry 默认值不同的用户覆盖值。
-
-    WebUI 需要把默认值展示在输入框中，但不能因此把默认值固化到 config.toml；
-    否则后续升级 Registry 默认模型或地址时，旧配置会继续覆盖新默认值。
+    Retain only user-specified overrides that differ from registry defaults.
     """
     normalized_value = (value or "").strip()
     normalized_default = (default_value or "").strip()

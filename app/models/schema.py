@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.config import config
 
-# 忽略 Pydantic 的特定警告
+# Suppress specific Pydantic warnings
 warnings.filterwarnings(
     "ignore",
     category=UserWarning,
@@ -57,20 +57,19 @@ class MaterialInfo:
     provider: str = "pexels"
     url: str = ""
     duration: int = 0
-    # 在线素材搜索会附带经过筛选的公开来源信息，供搜索缓存和任务记录复用。
-    # 本地上传素材不需要填写；写入任务文件前仍会按字段白名单重新构造，
-    # 避免外部请求传入的签名 URL、凭据或无关字段进入持久化数据。
+    # Online material searches include sanitized public source info for caching and task records.
+    # Local uploads do not require this; records are reconstructed against a whitelist before persistence.
     source_info: Optional[dict[str, Any]] = None
 
 
 class VideoParams(BaseModel):
     """
     {
-      "video_subject": "",
-      "video_aspect": "横屏 16:9（西瓜视频）",
-      "voice_name": "女生-晓晓",
+      "video_subject": "Scenic mountain sunset",
+      "video_aspect": "9:16",
+      "voice_name": "en-US-AriaNeural-Female",
       "bgm_name": "random",
-      "font_name": "STHeitiMedium 黑体-中",
+      "font_name": "STHeitiMedium.ttc",
       "text_color": "#FFFFFF",
       "font_size": 60,
       "stroke_color": "#000000",
@@ -108,8 +107,7 @@ class VideoParams(BaseModel):
     bgm_type: Optional[str] = "random"
     bgm_file: Optional[str] = ""
     bgm_volume: Optional[float] = 0.2
-    # 视频配乐供应商共用提示词，WebUI 新任务统一写入该字段。保留下面的
-    # Sonilo 专用字段以兼容旧任务记录和现有 CLI 参数。
+    # Unified music prompt shared across music providers.
     video_music_prompt: str = Field(default="", max_length=2000)
     sonilo_bgm_prompt: str = Field(default="", max_length=2000)
 
@@ -135,7 +133,7 @@ class VideoParams(BaseModel):
 class SubtitleRequest(BaseModel):
     video_script: str
     video_language: Optional[str] = ""
-    voice_name: Optional[str] = "zh-CN-XiaoxiaoNeural-Female"
+    voice_name: Optional[str] = "en-US-AriaNeural-Female"
     voice_volume: Optional[float] = 1.0
     voice_rate: Optional[float] = 1.2
     bgm_type: Optional[str] = "random"
@@ -156,7 +154,7 @@ class SubtitleRequest(BaseModel):
 class AudioRequest(BaseModel):
     video_script: str
     video_language: Optional[str] = ""
-    voice_name: Optional[str] = "zh-CN-XiaoxiaoNeural-Female"
+    voice_name: Optional[str] = "en-US-AriaNeural-Female"
     voice_volume: Optional[float] = 1.0
     voice_rate: Optional[float] = 1.2
     bgm_type: Optional[str] = "random"
@@ -168,7 +166,7 @@ class AudioRequest(BaseModel):
 class VideoScriptParams:
     """
     {
-      "video_subject": "春天的花海",
+      "video_subject": "Spring blooming flowers",
       "video_language": "",
       "paragraph_number": 1,
       "video_script_prompt": "",
@@ -176,7 +174,7 @@ class VideoScriptParams:
     }
     """
 
-    video_subject: Optional[str] = "春天的花海"
+    video_subject: Optional[str] = "Spring blooming flowers"
     video_language: Optional[str] = ""
     paragraph_number: int = Field(default=1, ge=1, le=10)
     video_script_prompt: str = Field(default="", max_length=2000)
@@ -193,9 +191,9 @@ class VideoTermsParams:
     }
     """
 
-    video_subject: Optional[str] = "春天的花海"
+    video_subject: Optional[str] = "Spring blooming flowers"
     video_script: Optional[str] = (
-        "春天的花海，如诗如画般展现在眼前。万物复苏的季节里，大地披上了一袭绚丽多彩的盛装。金黄的迎春、粉嫩的樱花、洁白的梨花、艳丽的郁金香……"
+        "Spring blooming flowers unfold like a picturesque landscape. In this season of renewal, nature awakens with vibrant colors..."
     )
     amount: Optional[int] = 5
     match_materials_to_script: bool = False
@@ -207,14 +205,14 @@ class VideoSocialMetadataParams:
       "video_subject": "A day in Shanghai",
       "video_script": "",
       "language": "auto",
-      "platform": "tiktok"
+      "platform": "youtube"
     }
     """
 
     video_subject: Optional[str] = Field(default="A day in Shanghai", max_length=500)
     video_script: Optional[str] = Field(default="", max_length=8000)
     language: Optional[str] = Field(default="auto", max_length=64)
-    platform: Optional[str] = Field(default="tiktok", max_length=64)
+    platform: Optional[str] = Field(default="youtube", max_length=64)
 
 
 class TaskVideoRequest(VideoParams, BaseModel):
@@ -252,7 +250,7 @@ class TaskResponseData(BaseModel):
 
 
 class TaskStatusData(BaseModel):
-    """任务查询对外保证的稳定字段；历史和扩展字段继续原样透传。"""
+    """Stable fields guaranteed for task status queries; extra/legacy fields pass through unchanged."""
 
     model_config = ConfigDict(extra="allow")
 
@@ -271,7 +269,7 @@ class TaskStatusData(BaseModel):
 
 
 class TaskListData(BaseModel):
-    """分页任务列表结构。"""
+    """Paginated task list structure."""
 
     tasks: List[TaskStatusData]
     total: int
@@ -334,10 +332,9 @@ class TaskResponse(BaseResponse):
 
 class TaskQueryResponse(BaseResponse):
     """
-    任务查询会返回生成状态和可选的跨平台发布状态。
+    Task status query returning generation state and optional publishing state.
 
-    生成失败时包含 `failed_stage` 和 `error`；生成完成后如果启用了自动发布，
-    `cross_post_state` 会依次进入 pending、processing、complete 或 failed。
+    Failure responses include `failed_stage` and `error`.
     """
 
     data: TaskStatusData
@@ -374,7 +371,7 @@ class TaskQueryResponse(BaseResponse):
 
 
 class TaskListResponse(BaseResponse):
-    """任务列表使用独立响应模型，避免与单任务查询混用文档结构。"""
+    """Dedicated response model for task lists."""
 
     data: TaskListData
 
@@ -423,7 +420,7 @@ class VideoScriptResponse(BaseResponse):
                 "status": 200,
                 "message": "success",
                 "data": {
-                    "video_script": "春天的花海，是大自然的一幅美丽画卷。在这个季节里，大地复苏，万物生长，花朵争相绽放，形成了一片五彩斑斓的花海..."
+                    "video_script": "Spring blooming flowers unfold like a picturesque landscape across nature..."
                 },
             },
         }
@@ -511,7 +508,7 @@ class VideoMaterialRetrieveResponse(BaseResponse):
                         {
                             "name": "example.mp4",
                             "size": 12345678,
-                            "file": "/MoneyPrinterTurbo/resource/videos/example.mp4",
+                            "file": "/Chronus/resource/videos/example.mp4",
                         }
                     ]
                 },
@@ -529,7 +526,7 @@ class VideoMaterialUploadResponse(BaseResponse):
                 "status": 200,
                 "message": "success",
                 "data": {
-                    "file": "/MoneyPrinterTurbo/resource/videos/example.mp4",
+                    "file": "/Chronus/resource/videos/example.mp4",
                 },
             },
         }

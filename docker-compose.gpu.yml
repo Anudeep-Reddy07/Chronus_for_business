@@ -1,35 +1,19 @@
-# GPU override file
-# Usage: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
-#
-# Prerequisites:
-#   1. NVIDIA GPU driver installed on host
-#   2. NVIDIA Container Toolkit installed
-#   3. Verify with: docker info | grep nvidia
-#
-# This file overrides the default docker-compose.yml to:
-#   - Build with Dockerfile.gpu (NVIDIA CUDA base image)
-#   - Attach GPU devices to both services because video generation can run in
-#     either the WebUI process or the API process
 services:
-  webui:
+  chronus-gpu:
     build:
       context: .
       dockerfile: Dockerfile.gpu
+    container_name: "chronus-studio-gpu"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./config.toml:/app/config.toml
+      - ./storage:/app/storage
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              count: all
               capabilities: [gpu]
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile.gpu
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+    restart: always

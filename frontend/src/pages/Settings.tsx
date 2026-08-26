@@ -2,9 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
   Key,
   Video,
-  FileText,
   Music,
-  Sliders,
   Type,
   CheckCircle2,
   RotateCcw,
@@ -13,9 +11,12 @@ import {
   Cpu,
   Volume2,
 } from 'lucide-react';
+import { apiClient } from '../api/client';
 
 interface EngineSettings {
   // API Keys
+  fishAudioApiKey: string;
+  fishAudioModel: string;
   openaiApiKey: string;
   openaiBaseUrl: string;
   pexelsApiKey: string;
@@ -52,6 +53,8 @@ interface EngineSettings {
 const SETTINGS_STORAGE_KEY = 'chronus_engine_settings';
 
 const defaultSettings: EngineSettings = {
+  fishAudioApiKey: '',
+  fishAudioModel: 's2.1-pro-free',
   openaiApiKey: '',
   openaiBaseUrl: 'https://api.openai.com/v1',
   pexelsApiKey: '',
@@ -91,13 +94,46 @@ export const Settings: React.FC = () => {
 
   const [savedNotice, setSavedNotice] = useState(false);
 
+  useEffect(() => {
+    // Load config from backend to populate keys
+    apiClient.getEngineConfig().then((cfg) => {
+      if (cfg) {
+        setSettings((prev) => ({
+          ...prev,
+          fishAudioApiKey: cfg.fish_audio_api_key || prev.fishAudioApiKey,
+          fishAudioModel: cfg.fish_audio_model || prev.fishAudioModel,
+          openaiApiKey: cfg.openai_api_key || prev.openaiApiKey,
+          openaiBaseUrl: cfg.openai_base_url || prev.openaiBaseUrl,
+          pexelsApiKey: cfg.pexels_api_key || prev.pexelsApiKey,
+          pixabayApiKey: cfg.pixabay_api_key || prev.pixabayApiKey,
+          elevenlabsApiKey: cfg.elevenlabs_api_key || prev.elevenlabsApiKey,
+          llmProvider: cfg.llm_provider || prev.llmProvider,
+          llmModel: cfg.llm_model || prev.llmModel,
+        }));
+      }
+    }).catch((e) => console.debug('Could not fetch server config:', e));
+  }, []);
+
   const updateSetting = <K extends keyof EngineSettings>(key: K, value: EngineSettings[K]) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     try {
       localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+      // Save credentials to backend
+      await apiClient.updateEngineConfig({
+        fish_audio_api_key: settings.fishAudioApiKey,
+        fish_audio_model: settings.fishAudioModel,
+        openai_api_key: settings.openaiApiKey,
+        openai_base_url: settings.openaiBaseUrl,
+        pexels_api_key: settings.pexelsApiKey,
+        pixabay_api_key: settings.pixabayApiKey,
+        elevenlabs_api_key: settings.elevenlabsApiKey,
+        llm_provider: settings.llmProvider,
+        llm_model: settings.llmModel,
+      }).catch((e) => console.warn('Server config save notice:', e));
+
       setSavedNotice(true);
       setTimeout(() => setSavedNotice(false), 3000);
     } catch (e) {
@@ -115,36 +151,28 @@ export const Settings: React.FC = () => {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '32px', maxWidth: '1080px', margin: '0 auto' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '30px', maxWidth: '1100px', margin: '0 auto' }}>
       {/* Header Banner */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-            <span style={{
-              fontSize: '0.75rem',
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              color: '#FFAE34',
-              letterSpacing: '0.08em',
-            }}>
-              Advanced Engine & Power-User Controls
-            </span>
-          </div>
-          <h1 style={{ fontSize: '2.4rem', fontWeight: 800, letterSpacing: '-0.03em' }}>
-            Engine <span className="gradient-text">Settings & Parameters</span>
+          <span className="eyebrow-label" style={{ display: 'block', marginBottom: '6px' }}>
+            System & Engine Configuration
+          </span>
+          <h1 style={{ fontSize: '2.2rem', fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--text-primary)', marginBottom: '4px' }}>
+            Engine Settings & Parameters
           </h1>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.96rem' }}>
-            Customize all underlying parameters for AI copywriting, voice synthesis, video compositing, and credentials.
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.94rem' }}>
+            Configure LLM copywriters, speech synthesis, video compositing, and credentials.
           </p>
         </div>
 
-        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          <button onClick={handleReset} className="btn-glass" style={{ padding: '10px 16px', fontSize: '0.86rem' }}>
-            <RotateCcw size={15} />
-            <span>Reset Defaults</span>
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <button onClick={handleReset} className="btn-secondary" style={{ padding: '8px 14px', fontSize: '0.84rem' }}>
+            <RotateCcw size={14} />
+            <span>Reset</span>
           </button>
-          <button onClick={handleSave} className="btn-primary" style={{ padding: '10px 22px', fontSize: '0.9rem' }}>
-            <Save size={16} />
+          <button onClick={handleSave} className="btn-vibrant" style={{ padding: '9px 20px', fontSize: '0.88rem' }}>
+            <Save size={15} />
             <span>Save Settings</span>
           </button>
         </div>
@@ -153,29 +181,33 @@ export const Settings: React.FC = () => {
       {/* Save Confirmation Toast */}
       {savedNotice && (
         <div style={{
-          padding: '14px 20px',
-          borderRadius: 'var(--radius-md)',
-          background: 'rgba(0, 223, 216, 0.18)',
-          border: '1px solid rgba(0, 223, 216, 0.5)',
-          color: '#00DFD8',
-          fontSize: '0.92rem',
+          padding: '14px 18px',
+          borderRadius: 'var(--radius-sm)',
+          background: '#EFF6FF',
+          border: '1px solid #BFDBFE',
+          color: '#1D4ED8',
+          fontSize: '0.88rem',
           display: 'flex',
           alignItems: 'center',
-          gap: '10px',
-          boxShadow: '0 0 25px rgba(0, 223, 216, 0.3)',
+          gap: '8px',
+          boxShadow: 'var(--shadow-card)',
         }}>
-          <CheckCircle2 size={20} color="#00DFD8" />
-          <span>Engine settings and credentials saved successfully!</span>
+          <CheckCircle2 size={18} color="#0066FF" />
+          <span>Engine settings and credentials saved successfully.</span>
         </div>
       )}
 
       {/* Navigation Tabs Bar */}
       <div style={{
         display: 'flex',
-        gap: '8px',
+        gap: '4px',
         flexWrap: 'wrap',
-        borderBottom: '1px solid rgba(255, 255, 255, 0.12)',
-        paddingBottom: '12px',
+        background: '#FFFFFF',
+        padding: '4px',
+        borderRadius: 'var(--radius-pill)',
+        border: '1px solid var(--border-subtle)',
+        boxShadow: 'var(--shadow-card)',
+        width: 'fit-content',
       }}>
         {[
           { id: 'api', label: 'API Credentials', icon: Key },
@@ -191,14 +223,23 @@ export const Settings: React.FC = () => {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={isActive ? 'btn-primary' : 'btn-glass'}
               style={{
-                fontSize: '0.88rem',
-                padding: '10px 18px',
+                fontSize: '0.84rem',
+                fontWeight: 700,
+                padding: '7px 16px',
                 borderRadius: 'var(--radius-pill)',
+                border: isActive ? '1px solid #BFDBFE' : '1px solid transparent',
+                background: isActive ? '#EFF6FF' : 'transparent',
+                color: isActive ? '#0066FF' : 'var(--text-secondary)',
+                boxShadow: isActive ? '0 2px 6px rgba(0, 102, 255, 0.08)' : 'none',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                transition: 'all 0.15s ease',
               }}
             >
-              <Icon size={16} />
+              <Icon size={14} />
               <span>{tab.label}</span>
             </button>
           );
@@ -209,22 +250,22 @@ export const Settings: React.FC = () => {
       {/* TAB 1: API CREDENTIALS                                                    */}
       {/* ========================================================================= */}
       {activeTab === 'api' && (
-        <div className="glass-panel" style={{ padding: '36px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        <div className="glass-panel" style={{ padding: '34px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
           <div>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 700 }}>API Provider Credentials</h3>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>API Provider Credentials</h3>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.86rem' }}>
               Credentials are kept securely in your local environment and used to access stock footage, LLM scripts, and voice cloning.
             </p>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+              <label style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                 OpenAI / DeepSeek / Moonshot API Key
               </label>
               <input
                 type="password"
-                className="glass-input"
+                className="app-input"
                 placeholder="sk-..."
                 value={settings.openaiApiKey}
                 onChange={(e) => updateSetting('openaiApiKey', e.target.value)}
@@ -232,26 +273,26 @@ export const Settings: React.FC = () => {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+              <label style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                 Custom LLM API Base URL
               </label>
               <input
                 type="text"
-                className="glass-input"
+                className="app-input"
                 placeholder="https://api.openai.com/v1"
                 value={settings.openaiBaseUrl}
                 onChange={(e) => updateSetting('openaiBaseUrl', e.target.value)}
               />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '18px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                <label style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                   Pexels API Key
                 </label>
                 <input
                   type="password"
-                  className="glass-input"
+                  className="app-input"
                   placeholder="Pexels authorization key..."
                   value={settings.pexelsApiKey}
                   onChange={(e) => updateSetting('pexelsApiKey', e.target.value)}
@@ -259,12 +300,12 @@ export const Settings: React.FC = () => {
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+                <label style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                   Pixabay API Key
                 </label>
                 <input
                   type="password"
-                  className="glass-input"
+                  className="app-input"
                   placeholder="Pixabay API key..."
                   value={settings.pixabayApiKey}
                   onChange={(e) => updateSetting('pixabayApiKey', e.target.value)}
@@ -272,13 +313,76 @@ export const Settings: React.FC = () => {
               </div>
             </div>
 
+            {/* Fish Audio Voice Cloning & Neural TTS Section */}
+            <div style={{
+              background: '#EFF6FF',
+              border: '1px solid #BFDBFE',
+              borderRadius: 'var(--radius-md)',
+              padding: '20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Sparkles size={16} color="var(--brand-primary)" />
+                  <span style={{ fontSize: '0.94rem', fontWeight: 700, color: 'var(--brand-primary)' }}>
+                    Fish Audio (Voice Cloning & Neural TTS)
+                  </span>
+                </div>
+                <a
+                  href="https://fish.audio/app/developers"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    fontSize: '0.78rem',
+                    color: 'var(--brand-primary)',
+                    fontWeight: 700,
+                    textDecoration: 'underline',
+                  }}
+                >
+                  Get Free API Key ↗
+                </a>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '16px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    Fish Audio API Key
+                  </label>
+                  <input
+                    type="password"
+                    className="app-input"
+                    placeholder="Enter Fish Audio API key..."
+                    value={settings.fishAudioApiKey}
+                    onChange={(e) => updateSetting('fishAudioApiKey', e.target.value)}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <label style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                    Fish Audio Model
+                  </label>
+                  <select
+                    className="glass-select"
+                    value={settings.fishAudioModel}
+                    onChange={(e) => updateSetting('fishAudioModel', e.target.value)}
+                  >
+                    <option value="s2.1-pro-free">s2.1-pro-free (Free / Default)</option>
+                    <option value="s2.1-pro">s2.1-pro (High Quality)</option>
+                    <option value="s2-pro">s2-pro</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
-                ElevenLabs API Key (for Voice Cloning)
+              <label style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                ElevenLabs API Key (Optional Alternative)
               </label>
               <input
                 type="password"
-                className="glass-input"
+                className="app-input"
                 placeholder="xi-api-key..."
                 value={settings.elevenlabsApiKey}
                 onChange={(e) => updateSetting('elevenlabsApiKey', e.target.value)}
@@ -292,17 +396,17 @@ export const Settings: React.FC = () => {
       {/* TAB 2: LLM & AI SCRIPT COPYWRITING                                        */}
       {/* ========================================================================= */}
       {activeTab === 'llm' && (
-        <div className="glass-panel" style={{ padding: '36px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        <div className="glass-panel" style={{ padding: '34px', display: 'flex', flexDirection: 'column', gap: '22px' }}>
           <div>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 700 }}>LLM & AI Copywriting Model</h3>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>LLM & AI Copywriting Model</h3>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.86rem' }}>
               Configure which model writes viral hooks, video narration scripts, and keywords.
             </p>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+              <label style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                 LLM Provider
               </label>
               <select
@@ -310,21 +414,21 @@ export const Settings: React.FC = () => {
                 value={settings.llmProvider}
                 onChange={(e) => updateSetting('llmProvider', e.target.value)}
               >
-                <option value="openai" style={{ background: '#1B1A28' }}>OpenAI (ChatGPT)</option>
-                <option value="deepseek" style={{ background: '#1B1A28' }}>DeepSeek AI</option>
-                <option value="gemini" style={{ background: '#1B1A28' }}>Google Gemini</option>
-                <option value="moonshot" style={{ background: '#1B1A28' }}>Moonshot (Kimi)</option>
-                <option value="ollama" style={{ background: '#1B1A28' }}>Ollama (Local)</option>
+                <option value="openai">OpenAI (ChatGPT)</option>
+                <option value="deepseek">DeepSeek AI</option>
+                <option value="gemini">Google Gemini</option>
+                <option value="moonshot">Moonshot (Kimi)</option>
+                <option value="ollama">Ollama (Local)</option>
               </select>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+              <label style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                 Model Identifier
               </label>
               <input
                 type="text"
-                className="glass-input"
+                className="app-input"
                 placeholder="e.g. gpt-4o, deepseek-chat, gemini-1.5-pro"
                 value={settings.llmModel}
                 onChange={(e) => updateSetting('llmModel', e.target.value)}
@@ -338,17 +442,17 @@ export const Settings: React.FC = () => {
       {/* TAB 3: VOICE & TTS ENGINE                                                 */}
       {/* ========================================================================= */}
       {activeTab === 'tts' && (
-        <div className="glass-panel" style={{ padding: '36px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        <div className="glass-panel" style={{ padding: '34px', display: 'flex', flexDirection: 'column', gap: '22px' }}>
           <div>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 700 }}>TTS Engine & Speech Controls</h3>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>TTS Engine & Speech Controls</h3>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.86rem' }}>
               Adjust speech pacing, volume multiplier, and primary speech synthesis engine.
             </p>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+              <label style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                 Speech Synthesis Engine
               </label>
               <select
@@ -356,15 +460,15 @@ export const Settings: React.FC = () => {
                 value={settings.ttsServer}
                 onChange={(e) => updateSetting('ttsServer', e.target.value)}
               >
-                <option value="azure-tts-v1" style={{ background: '#1B1A28' }}>Azure Edge Neural TTS (Free / Default)</option>
-                <option value="elevenlabs" style={{ background: '#1B1A28' }}>ElevenLabs High-Fidelity</option>
-                <option value="siliconflow" style={{ background: '#1B1A28' }}>SiliconFlow CosyVoice</option>
-                <option value="gemini-tts" style={{ background: '#1B1A28' }}>Google Gemini Voice</option>
+                <option value="azure-tts-v1">Azure Edge Neural TTS (Free / Default)</option>
+                <option value="elevenlabs">ElevenLabs High-Fidelity</option>
+                <option value="siliconflow">SiliconFlow CosyVoice</option>
+                <option value="gemini-tts">Google Gemini Voice</option>
               </select>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+              <label style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                 Speech Speed Multiplier ({settings.voiceRate}x)
               </label>
               <input
@@ -374,7 +478,7 @@ export const Settings: React.FC = () => {
                 step="0.05"
                 value={settings.voiceRate}
                 onChange={(e) => updateSetting('voiceRate', parseFloat(e.target.value))}
-                style={{ accentColor: '#FF007A', marginTop: '10px' }}
+                style={{ accentColor: 'var(--brand-primary)', marginTop: '8px' }}
               />
             </div>
           </div>
@@ -385,31 +489,31 @@ export const Settings: React.FC = () => {
       {/* TAB 4: VIDEO COMPOSITING & TRANSITIONS                                    */}
       {/* ========================================================================= */}
       {activeTab === 'video' && (
-        <div className="glass-panel" style={{ padding: '36px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        <div className="glass-panel" style={{ padding: '34px', display: 'flex', flexDirection: 'column', gap: '22px' }}>
           <div>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Video Compositing Parameters</h3>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>Video Compositing Parameters</h3>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.86rem' }}>
               Configure individual clip durations, splicing speed, and material sequencing modes.
             </p>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+              <label style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                 Max Clip Duration (seconds)
               </label>
               <input
                 type="number"
                 min="2"
                 max="15"
-                className="glass-input"
+                className="app-input"
                 value={settings.clipDuration}
                 onChange={(e) => updateSetting('clipDuration', parseInt(e.target.value) || 5)}
               />
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+              <label style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                 Material Splicing Concat Mode
               </label>
               <select
@@ -417,8 +521,8 @@ export const Settings: React.FC = () => {
                 value={settings.concatMode}
                 onChange={(e) => updateSetting('concatMode', e.target.value)}
               >
-                <option value="random" style={{ background: '#1B1A28' }}>Random Dynamic Blend (Recommended)</option>
-                <option value="sequential" style={{ background: '#1B1A28' }}>Sequential Chronological Order</option>
+                <option value="random">Random Dynamic Blend (Recommended)</option>
+                <option value="sequential">Sequential Chronological Order</option>
               </select>
             </div>
           </div>
@@ -429,51 +533,51 @@ export const Settings: React.FC = () => {
       {/* TAB 5: SUBTITLES & TYPOGRAPHY                                             */}
       {/* ========================================================================= */}
       {activeTab === 'subtitles' && (
-        <div className="glass-panel" style={{ padding: '36px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        <div className="glass-panel" style={{ padding: '34px', display: 'flex', flexDirection: 'column', gap: '22px' }}>
           <div>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Subtitles & Typography Styling</h3>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>Subtitles & Typography Styling</h3>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.86rem' }}>
               Customize font size, stroke borders, and text foreground colors on rendered videos.
             </p>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+              <label style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                 Font Size (px)
               </label>
               <input
                 type="number"
                 min="30"
                 max="120"
-                className="glass-input"
+                className="app-input"
                 value={settings.fontSize}
                 onChange={(e) => updateSetting('fontSize', parseInt(e.target.value) || 60)}
               />
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+              <label style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                 Text Color
               </label>
               <input
                 type="color"
-                className="glass-input"
-                style={{ height: '48px', padding: '4px' }}
+                className="app-input"
+                style={{ height: '42px', padding: '2px', cursor: 'pointer' }}
                 value={settings.textColor}
                 onChange={(e) => updateSetting('textColor', e.target.value)}
               />
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+              <label style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                 Stroke / Border Width (px)
               </label>
               <input
                 type="number"
                 min="0"
                 max="10"
-                className="glass-input"
+                className="app-input"
                 value={settings.strokeWidth}
                 onChange={(e) => updateSetting('strokeWidth', parseInt(e.target.value) || 2)}
               />
@@ -486,17 +590,17 @@ export const Settings: React.FC = () => {
       {/* TAB 6: BGM & AUDIO MASTERING                                              */}
       {/* ========================================================================= */}
       {activeTab === 'bgm' && (
-        <div className="glass-panel" style={{ padding: '36px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+        <div className="glass-panel" style={{ padding: '34px', display: 'flex', flexDirection: 'column', gap: '22px' }}>
           <div>
-            <h3 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Background Music & Mixing</h3>
+            <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>Background Music & Mixing</h3>
             <p style={{ color: 'var(--text-secondary)', fontSize: '0.86rem' }}>
               Set background music soundtrack selection behavior and volume balance.
             </p>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+              <label style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                 Soundtrack Type
               </label>
               <select
@@ -504,13 +608,13 @@ export const Settings: React.FC = () => {
                 value={settings.bgmType}
                 onChange={(e) => updateSetting('bgmType', e.target.value)}
               >
-                <option value="random" style={{ background: '#1B1A28' }}>Random Curated Royalty-Free Beat</option>
-                <option value="none" style={{ background: '#1B1A28' }}>None (Voiceover only)</option>
+                <option value="random">Random Curated Royalty-Free Beat</option>
+                <option value="none">None (Voiceover only)</option>
               </select>
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              <label style={{ fontSize: '0.88rem', fontWeight: 600, color: 'var(--text-secondary)' }}>
+              <label style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                 BGM Volume Level ({Math.round(settings.bgmVolume * 100)}%)
               </label>
               <input
@@ -520,7 +624,7 @@ export const Settings: React.FC = () => {
                 step="0.05"
                 value={settings.bgmVolume}
                 onChange={(e) => updateSetting('bgmVolume', parseFloat(e.target.value))}
-                style={{ accentColor: '#00DFD8', marginTop: '10px' }}
+                style={{ accentColor: 'var(--brand-primary)', marginTop: '8px' }}
               />
             </div>
           </div>

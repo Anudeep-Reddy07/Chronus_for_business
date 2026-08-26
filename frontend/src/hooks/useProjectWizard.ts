@@ -54,44 +54,32 @@ const initialDraftState: WizardFormState = {
   taskState: 0,
   generatedVideoUrl: null,
   generationError: null,
-  selectedPlatforms: ['tiktok', 'instagram'],
+  selectedPlatforms: ['youtube'],
   publishSuccess: false,
   publishResults: {},
 };
 
 export const useProjectWizard = () => {
+  // Always initialize fresh empty form state for a new project
   const [state, setState] = useState<WizardFormState>(() => {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        return {
-          ...initialDraftState,
-          ...parsed,
-          uploadedFiles: [], // Files cannot be serialized
-        };
-      }
-    } catch (e) {
-      console.warn('Failed to parse wizard draft from storage:', e);
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // ignore
     }
     return initialDraftState;
   });
-
-  useEffect(() => {
-    try {
-      const { uploadedFiles, ...persistable } = state;
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(persistable));
-    } catch (e) {
-      console.warn('Failed to persist wizard state:', e);
-    }
-  }, [state]);
 
   const updateState = (updates: Partial<WizardFormState>) => {
     setState((prev) => ({ ...prev, ...updates }));
   };
 
   const resetWizard = () => {
-    localStorage.removeItem(STORAGE_KEY);
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // ignore
+    }
     setState(initialDraftState);
   };
 

@@ -1,5 +1,6 @@
 """Hybrid material assembly: owner media first, similar stock fills the gap,
 then blended so owner footage is spread throughout the timeline."""
+import os
 import random
 from typing import List
 
@@ -19,12 +20,16 @@ def get_studio_materials(task_id, params, video_terms, audio_duration):
     clip_duration = int(params.video_clip_duration or 5)
 
     # 1. Owner media (videos AND images; images become short zoom clips)
-    rows = db.query(
-        "SELECT url FROM media_items WHERE project_id=? ORDER BY created_at",
-        (project_id,),
-    )
+    rows = []
+    if project_id:
+        rows = db.query(
+            "SELECT url FROM media_items WHERE project_id=? ORDER BY created_at",
+            (project_id,),
+        )
     local_materials = [MaterialInfo(provider="local", url=row["url"], duration=0) for row in rows]
     local_materials = video.preprocess_video(local_materials, clip_duration=clip_duration)
+    # Ensure all local materials actually exist on disk
+    local_materials = [m for m in local_materials if m.url and os.path.exists(m.url)]
 
     local_seconds = 0.0
     for m in local_materials:
@@ -38,26 +43,32 @@ def get_studio_materials(task_id, params, video_terms, audio_duration):
     local_seconds = min(local_seconds, audio_duration)
     remaining = max(0.0, audio_duration - local_seconds)
     stock_paths: List[str] = []
-    if remaining > 0 and video_terms:
+    need_stock = remaining > 0 or not local_materials
+    if need_stock and video_terms:
+        download_duration = audio_duration if not local_materials else remaining
         stock_paths = material.download_videos(
             task_id=task_id,
             search_terms=video_terms,
             source=stock_source,
             video_aspect=aspect,
             video_concat_mode=VideoConcatMode.random,
-            audio_duration=remaining,
+            audio_duration=download_duration,
             max_clip_duration=clip_duration,
             match_script_order=params.match_materials_to_script,
         )
-        logger.info(f"studio: downloaded {len(stock_paths)} stock clips to cover {remaining:.1f}s")
+        logger.info(f"studio: downloaded {len(stock_paths)} stock clips to cover {download_duration:.1f}s")
 
     # 3. Blend local + stock so owner footage is spread throughout
     return blend(list(local_materials), list(stock_paths), blend_mode)
 
 
 def blend(local_materials, stock_paths, mode="blend"):
-    local = [m.url for m in local_materials]
-    stock = list(stock_paths)
+    local = [m.url for m in local_materials if m.url and os.path.exists(m.url)]
+    stock = [p for p in stock_paths if p and os.path.exists(p)]
+    if not local:
+        return stock
+    if not stock:
+        return local
     if mode == "local_first":
         return local + stock
     if mode == "interleave":

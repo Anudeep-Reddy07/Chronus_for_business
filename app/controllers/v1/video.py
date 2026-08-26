@@ -36,8 +36,8 @@ from app.services import state as sm
 from app.services import task as tm
 from app.utils import file_security, utils
 
-# 统一在 V1 视频路由入口执行鉴权。verify_token 会在 api_key 为空时
-# 保留现有免认证行为，只有管理员显式配置后才会影响客户端。
+# Enforce authentication at the V1 video router entry. verify_token preserves
+# open local access when api_key is not configured.
 router = new_router(dependencies=[Depends(base.verify_token)])
 
 _enable_redis = config.app.get("enable_redis", False)
@@ -49,7 +49,7 @@ _max_concurrent_tasks = config.app.get("max_concurrent_tasks", 5)
 _max_queued_tasks = config.app.get("max_queued_tasks", 100)
 
 redis_url = f"redis://:{_redis_password}@{_redis_host}:{_redis_port}/{_redis_db}"
-# 根据配置选择合适的任务管理器
+# Select task manager based on configuration
 if _enable_redis:
     task_manager = RedisTaskManager(
         max_concurrent_tasks=_max_concurrent_tasks,
@@ -64,8 +64,7 @@ else:
 
 
 def _sanitize_upload_filename(filename: str, request_id: str) -> str:
-    # 浏览器或客户端有时会附带目录信息，甚至可能夹带 ../ 这类穿越片段。
-    # 这里只保留纯文件名，避免上传接口把文件写到目标目录之外。
+    # Retain basename only to prevent directory traversal attacks
     normalized_name = (filename or "").replace("\\", "/").split("/")[-1].strip()
     if not normalized_name or normalized_name in {".", ".."}:
         raise HttpException(
@@ -92,7 +91,7 @@ def _resolve_path_within_directory(base_dir: str, unsafe_path: str, request_id: 
 
 
 def _public_task_data(task: dict) -> dict:
-    """复制任务状态并移除仅用于服务端进程协调的内部字段。"""
+    """Clone task state dict and strip internal coordination fields."""
     public_task = dict(task)
     public_task.pop("cross_post_owner", None)
     return public_task
@@ -105,11 +104,21 @@ def _task_file_to_uri(file: str, endpoint: str, task_dir: str, request_id: str) 
     if file.startswith(("http://", "https://")):
         return file
 
+    normalized = file.replace("\\", "/")
+    if normalized.startswith("/tasks/"):
+        uri_path = normalized.lstrip("/")
+        if endpoint:
+            return f"{endpoint.rstrip('/')}/{uri_path}"
+        return f"/{uri_path}"
+    if normalized.startswith("tasks/"):
+        uri_path = normalized
+        if endpoint:
+            return f"{endpoint.rstrip('/')}/{uri_path}"
+        return f"/{uri_path}"
+
     try:
         resolved_path = file_security.resolve_path_within_directory(task_dir, file)
     except ValueError as exc:
-        # 任务状态理论上只应保存任务目录内的产物路径。这里不再继续拼接 URL，
-        # 避免把异常路径包装成可访问链接；同时保留原值，便于排查历史脏数据。
         logger.warning(
             f"skip unsafe task output path, request_id: {request_id}, path: {file}, "
             f"error: {str(exc)}"
@@ -126,7 +135,7 @@ def _task_file_to_uri(file: str, endpoint: str, task_dir: str, request_id: str) 
 def _parse_byte_range(
     range_header: str | None, file_size: int, request_id: str
 ) -> tuple[int, int]:
-    """解析单段 HTTP Range，并把无效或越界请求稳定转换成 416。"""
+    """Parse single-range HTTP Range header into start/end byte offsets."""
     if file_size <= 0:
         raise HttpException(
             task_id=request_id,
@@ -138,8 +147,6 @@ def _parse_byte_range(
         return 0, file_size - 1
 
     try:
-        # 视频播放器这里只需要单段 bytes range。拒绝多段请求可以避免返回体
-        # 与 Content-Range 不一致，也避免异常字符串落入 int() 产生 500。
         if not range_header.startswith("bytes=") or "," in range_header:
             raise ValueError("unsupported range format")
         start_text, end_text = range_header[6:].split("-", 1)
@@ -212,9 +219,7 @@ def create_task(
                 tm.start, task_id=task_id, params=body, stop_at=stop_at
             )
         except Exception:
-            # 状态记录在调度前创建，默认标记为 processing。如果调度器没能
-            # 接管任务（例如线程启动失败或 Redis 队列不可用），必须回滚该
-            # 记录，否则 API 和 WebUI 会永久展示一个实际从未运行的任务。
+            # Rollback state record if scheduler failed to accept task
             sm.state.delete_task(task_id)
             raise
         logger.success(f"Task created: {utils.to_json(task)}")
@@ -237,16 +242,122 @@ def get_all_tasks(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1),
 ):
+    request_id = base.get_task_id(request)
+    endpoint = config.app.get("endpoint", "").rstrip("/")
+    task_dir = utils.task_dir()
+
     tasks, total = sm.state.get_all_tasks(page, page_size)
+    task_map: dict[str, dict] = {}
+    video_to_task_id: dict[str, str] = {}
+    studio_prj_to_task_id: dict[str, str] = {}
+
+    for task in tasks:
+        tid = task.get("task_id") or task.get("id")
+        if not tid:
+            continue
+        public_t = _public_task_data(task)
+        if "videos" in public_t and public_t["videos"]:
+            formatted_videos = []
+            for v in public_t["videos"]:
+                norm_v = _task_file_to_uri(v, endpoint, task_dir, request_id)
+                formatted_videos.append(norm_v)
+                try:
+                    from app.studio import db as studio_db
+                    v_key = studio_db.normalize_video_path(v)
+                    if v_key:
+                        video_to_task_id[v_key] = tid
+                except Exception:
+                    pass
+            public_t["videos"] = formatted_videos
+
+        task_map[tid] = public_t
+        studio_pid = task.get("studio_project_id") or (task.get("params") or {}).get("studio_project_id")
+        if studio_pid:
+            studio_prj_to_task_id[studio_pid] = tid
+
+    # Merge persistent projects & renders from SQLite
+    try:
+        from app.models import const
+        from app.studio import db as studio_db
+
+        db_projects = studio_db.get_all_projects_with_renders()
+        for p in db_projects:
+            pid = p.get("project_id")
+            if not pid:
+                continue
+            video_path = p.get("video_path")
+            norm_video = studio_db.normalize_video_path(video_path) if video_path else ""
+            formatted_video_path = (
+                _task_file_to_uri(norm_video, endpoint, task_dir, request_id)
+                if norm_video
+                else None
+            )
+            title = p.get("title") or "Untitled Project"
+            topic = p.get("topic") or ""
+
+            # Check if this DB project corresponds to an in-memory task
+            matching_tid = None
+            if pid in task_map:
+                matching_tid = pid
+            elif pid in studio_prj_to_task_id:
+                matching_tid = studio_prj_to_task_id[pid]
+            elif norm_video and norm_video in video_to_task_id:
+                matching_tid = video_to_task_id[norm_video]
+
+            if matching_tid and matching_tid in task_map:
+                # Merge DB project data into the existing in-memory task
+                task_map[matching_tid]["title"] = title
+                task_map[matching_tid]["topic"] = topic
+                if not task_map[matching_tid].get("videos") and formatted_video_path:
+                    task_map[matching_tid]["videos"] = [formatted_video_path]
+            elif page == 1:
+                videos_list = [formatted_video_path] if formatted_video_path else []
+                task_map[pid] = {
+                    "task_id": pid,
+                    "state": const.TASK_STATE_COMPLETE if formatted_video_path else const.TASK_STATE_DRAFT,
+                    "progress": 100 if formatted_video_path else 0,
+                    "videos": videos_list,
+                    "combined_videos": [],
+                    "params": {
+                        "video_subject": title,
+                        "video_topic": topic,
+                    },
+                    "title": title,
+                    "topic": topic,
+                    "created_at": p.get("created_at") or 0,
+                }
+                if norm_video:
+                    video_to_task_id[norm_video] = pid
+    except Exception as exc:
+        logger.debug(f"could not merge sqlite projects into tasks: {exc}")
+
+    # Deduplicate tasks that share the exact same video file
+    try:
+        from app.studio import db as studio_db
+        seen_videos = set()
+        deduped_tasks = []
+        all_tasks = list(task_map.values())
+        all_tasks.sort(key=lambda x: x.get("created_at") or 0, reverse=True)
+        for t in all_tasks:
+            videos = t.get("videos") or []
+            if videos:
+                primary_v = studio_db.normalize_video_path(videos[0])
+                if primary_v in seen_videos:
+                    continue
+                seen_videos.add(primary_v)
+            deduped_tasks.append(t)
+        merged_tasks = deduped_tasks
+    except Exception:
+        merged_tasks = list(task_map.values())
+        merged_tasks.sort(key=lambda x: x.get("created_at") or 0, reverse=True)
 
     response = {
-        "tasks": [_public_task_data(task) for task in tasks],
-        "total": total,
+        "tasks": merged_tasks,
+        "total": max(total, len(merged_tasks)),
         "page": page,
         "page_size": page_size,
     }
     return utils.get_response(200, response)
-
 
 
 @router.get(
@@ -259,22 +370,70 @@ def get_task(
 ):
     request_id = base.get_task_id(request)
     endpoint = config.app.get("endpoint", "").rstrip("/")
+    task_dir = utils.task_dir()
     task = sm.state.get_task(task_id)
+
+    # Check by studio_project_id in sm.state if not matched by task_id directly
+    if not task:
+        all_sm_tasks, _ = sm.state.get_all_tasks(1, 100)
+        for t in all_sm_tasks:
+            if t.get("studio_project_id") == task_id or t.get("params", {}).get("studio_project_id") == task_id:
+                task = t
+                break
+
     if task:
-        task_dir = utils.task_dir()
         response_task = _public_task_data(task)
 
-        if "videos" in task:
+        if "videos" in task and task["videos"]:
             response_task["videos"] = [
                 _task_file_to_uri(v, endpoint, task_dir, request_id)
                 for v in task["videos"]
             ]
-        if "combined_videos" in task:
+        if "combined_videos" in task and task["combined_videos"]:
             response_task["combined_videos"] = [
                 _task_file_to_uri(v, endpoint, task_dir, request_id)
                 for v in task["combined_videos"]
             ]
         return utils.get_response(200, response_task)
+
+    # Fallback to SQLite if task not in memory (e.g. server restarted)
+    try:
+        from app.models import const
+        from app.studio import db as studio_db
+
+        projects = studio_db.query("SELECT * FROM projects WHERE id = ?", (task_id,))
+        if projects:
+            p = projects[0]
+            renders = studio_db.query(
+                "SELECT * FROM renders WHERE project_id = ? ORDER BY created_at DESC",
+                (task_id,),
+            )
+            video_path = renders[0]["video_path"] if renders else None
+            formatted_video_path = (
+                _task_file_to_uri(video_path, endpoint, task_dir, request_id)
+                if video_path
+                else None
+            )
+            title = p.get("title") or "Untitled Project"
+            topic = p.get("topic") or ""
+
+            fallback_task = {
+                "task_id": task_id,
+                "state": const.TASK_STATE_COMPLETE if formatted_video_path else const.TASK_STATE_DRAFT,
+                "progress": 100 if formatted_video_path else 0,
+                "videos": [formatted_video_path] if formatted_video_path else [],
+                "combined_videos": [],
+                "params": {
+                    "video_subject": title,
+                    "video_topic": topic,
+                },
+                "title": title,
+                "topic": topic,
+                "created_at": p.get("created_at") or 0,
+            }
+            return utils.get_response(200, fallback_task)
+    except Exception as exc:
+        logger.debug(f"failed SQLite fallback lookup for task_id {task_id}: {exc}")
 
     raise HttpException(
         task_id=task_id, status_code=404, message=f"{request_id}: task not found"
@@ -289,26 +448,76 @@ def get_task(
 def delete_video(request: Request, task_id: str = Path(..., description="Task ID")):
     request_id = base.get_task_id(request)
     task = sm.state.get_task(task_id)
+    if task and tm.is_task_busy(task):
+        logger.warning(
+            f"refuse to delete busy task, request_id: {request_id}, "
+            f"task_id: {task_id}, state: {task.get('state')}, "
+            f"cross_post_state: {task.get('cross_post_state')}"
+        )
+        raise HttpException(
+            task_id=task_id,
+            status_code=409,
+            message=f"{request_id}: task is still running",
+        )
+
+    deleted_anything = False
+    tasks_dir = utils.task_dir()
+
+    # 1. Delete task directory if it matches task_id directly
+    current_task_dir = os.path.join(tasks_dir, task_id)
+    if os.path.exists(current_task_dir):
+        shutil.rmtree(current_task_dir, ignore_errors=True)
+        deleted_anything = True
+
+    # 2. Look up SQLite renders and project media associated with task_id or project_id
+    try:
+        from app.studio import db as studio_db
+
+        renders = studio_db.query(
+            "SELECT * FROM renders WHERE project_id = ? OR id = ? OR video_path LIKE ?",
+            (task_id, task_id, f"%{task_id}%"),
+        )
+        for r in renders:
+            video_path = r.get("video_path") or ""
+            if "tasks/" in video_path:
+                parts = video_path.replace("\\", "/").split("tasks/")[-1].split("/")
+                if parts and parts[0]:
+                    render_task_folder = os.path.join(tasks_dir, parts[0])
+                    if os.path.exists(render_task_folder):
+                        shutil.rmtree(render_task_folder, ignore_errors=True)
+                        deleted_anything = True
+
+        studio_media_dir = os.path.join(
+            utils.storage_dir("local_videos"), "studio", task_id
+        )
+        if os.path.exists(studio_media_dir):
+            shutil.rmtree(studio_media_dir, ignore_errors=True)
+            deleted_anything = True
+
+        r_deleted = studio_db.execute(
+            "DELETE FROM renders WHERE project_id = ? OR id = ? OR video_path LIKE ?",
+            (task_id, task_id, f"%{task_id}%"),
+        )
+        m_deleted = studio_db.execute("DELETE FROM media_items WHERE project_id = ?", (task_id,))
+        p_deleted = studio_db.execute("DELETE FROM projects WHERE id = ?", (task_id,))
+        if (r_deleted or 0) > 0 or (m_deleted or 0) > 0 or (p_deleted or 0) > 0:
+            deleted_anything = True
+    except Exception as exc:
+        logger.warning(f"error cleaning up SQLite project records for {task_id}: {exc}")
+
+    # 3. Clean up in-memory task state (both by task_id and by studio_project_id)
     if task:
-        if tm.is_task_busy(task):
-            logger.warning(
-                f"refuse to delete busy task, request_id: {request_id}, "
-                f"task_id: {task_id}, state: {task.get('state')}, "
-                f"cross_post_state: {task.get('cross_post_state')}"
-            )
-            raise HttpException(
-                task_id=task_id,
-                status_code=409,
-                message=f"{request_id}: task is still running",
-            )
-
-        tasks_dir = utils.task_dir()
-        current_task_dir = os.path.join(tasks_dir, task_id)
-        if os.path.exists(current_task_dir):
-            shutil.rmtree(current_task_dir)
-
         sm.state.delete_task(task_id)
-        logger.success(f"video deleted: {utils.to_json(task)}")
+        deleted_anything = True
+
+    all_sm_tasks, _ = sm.state.get_all_tasks(1, 100)
+    for t in all_sm_tasks:
+        if t.get("studio_project_id") == task_id or (t.get("params") or {}).get("studio_project_id") == task_id:
+            sm.state.delete_task(t.get("task_id") or t.get("id"))
+            deleted_anything = True
+
+    if deleted_anything:
+        logger.success(f"task and local folders deleted: task_id={task_id}")
         return utils.get_response(200)
 
     raise HttpException(
@@ -327,8 +536,7 @@ def get_bgm_list(request: Request):
             {
                 "name": filename,
                 "size": os.path.getsize(file),
-                # 只返回文件名，避免把服务器绝对路径暴露给调用方。服务端会
-                # 在 storage/bgm 和 resource/songs 两个白名单目录中重新解析。
+                # Return filename only to prevent exposing host absolute paths
                 "file": filename,
             }
         )
@@ -354,8 +562,6 @@ def upload_bgm_file(request: Request, file: UploadFile = File(...)):
     try:
         safe_filename = bgm_service.save_bgm_upload(file.filename, file.file)
     except bgm_service.BgmUploadError as exc:
-        # 上传失败通常可以由用户更换文件后恢复，因此记录 request_id 和明确原因，
-        # 但不输出文件内容或绝对路径，避免日志泄露用户数据。
         logger.warning(
             f"background music upload rejected: request_id={request_id}, error={str(exc)}"
         )
@@ -365,8 +571,6 @@ def upload_bgm_file(request: Request, file: UploadFile = File(...)):
             message=f"{request_id}: {str(exc)}",
         )
     except bgm_service.BgmServiceError as exc:
-        # 工具链或存储故障属于服务端问题，不能伪装成用户文件错误。日志保留
-        # request_id 和内部原因，HTTP 响应只返回稳定文案，避免暴露服务器路径。
         logger.error(
             f"background music upload failed: request_id={request_id}, error={str(exc)}"
         )
@@ -391,8 +595,7 @@ def get_video_materials_list(request: Request):
     files = []
     for suffix in allowed_suffixes:
         files.extend(glob.glob(os.path.join(local_videos_dir, f"*.{suffix}")))
-    # 文件系统枚举顺序不稳定，直接返回会导致“顺序拼接”在不同机器或不同
-    # 时刻表现不一致。这里统一按文件名排序，至少保证服务端返回顺序可预测。
+    # Predictable ordering by filename
     files.sort(key=lambda file_path: os.path.basename(file_path).lower())
     video_materials_list = []
     for file in files:
@@ -401,8 +604,6 @@ def get_video_materials_list(request: Request):
             {
                 "name": filename,
                 "size": os.path.getsize(file),
-                # 与 BGM 一样，只返回文件名；创建任务时再在 local_videos
-                # 白名单目录内解析，避免 API 泄露宿主机绝对路径。
                 "file": filename,
             }
         )

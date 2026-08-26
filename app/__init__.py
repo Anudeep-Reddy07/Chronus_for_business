@@ -1,3 +1,3 @@
-"""MoneyPrinterTurbo 应用包元数据。"""
+"""Chronus application package metadata."""
 
 __version__ = "1.3.5"
