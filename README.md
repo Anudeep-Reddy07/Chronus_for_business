@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-
-=======
 # Chronus for Business — AI Video Studio 🎬⚡
 
 **Chronus** is an automated, AI-powered short video advertisement creation platform. Built for businesses, agencies, and creators to transform product media, marketing prompts, and scripts into high-converting video campaigns with neural voiceovers.
@@ -128,4 +125,3 @@ api_key = "YOUR_ELEVEN_KEY"   # Optional ElevenLabs integration
 
 ## 📄 License
 This project is licensed under the [MIT License](LICENSE).
->>>>>>> c84bb7e (feat(v2.0.0): Chronus Studio v2.0 - Craft/Attio Design System, Pinned Navigation, Dead Code Cleanup)
